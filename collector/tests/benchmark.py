@@ -13,11 +13,11 @@ p=argparse.ArgumentParser();p.add_argument('--rows',type=int,required=True);a=p.
 assert 1<=a.rows<=10000
 with tempfile.TemporaryDirectory() as tmp:
     root=Path(tmp);w=openpyxl.Workbook(write_only=True);s=w.create_sheet('Synthetic')
-    s.append(['NPSN','Nama','Total','L','P'])
-    for i in range(a.rows):s.append([str(10000000+i),'SYNTHETIC SCHOOL '+str(i),100,50,50])
+    s.append(['NPSN','Nama','Total','L','P','Bentuk'])
+    for i in range(a.rows):s.append([str(10000000+i),'SYNTHETIC SCHOOL '+str(i),100,50,50,'SMP' if i%2 else 'SMA'])
     x=root/'fixture.xlsx';w.save(x);w.close();c.initialize(root/'test.sqlite');db=c.connect(root/'test.sqlite')
     start=time.monotonic()
-    imp=c.import_xlsx(db,x,'Synthetic',{'npsn':'NPSN','name':'Nama','students_total':'Total','students_male':'L','students_female':'P'},2026)
+    imp=c.import_xlsx(db,x,'Synthetic',{'npsn':'NPSN','name':'Nama','students_total':'Total','students_male':'L','students_female':'P','school_form':'Bentuk'},2026)
     import_seconds=time.monotonic()-start;start=time.monotonic()
     while c.run_jobs(db,100)['results']:pass
     duration=time.monotonic()-start

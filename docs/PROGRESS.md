@@ -1917,3 +1917,46 @@ semantics and import10NPSNstaged; operatorLocalWPpreview10; sourcesrights/networ
 implementdescriptionpublisher withnonce/capability/backup/hashconflict/transaction/
 audit/undo then oneapprovedSchooltest before10/100/1000. RollbackCollectorfiles+
 stoppedSQLitebackup; no WordPressschema/data migration or oldprofiledeletion.
+
+Collector source/docs/tests delivered to refs/heads/development/collector-2026 at 4fafb4ae626402b10bd981f409fe93e4beb8ce53. Main and plugin7.18delivery unchanged. Source-only new branch, no dataset/SQLite/Excel upload. NativeuserLocalWP/combinedExcel/Ollamaactual remain pending.
+
+
+## Collector2026.2 — DONE priority and header tool; national workbook TRANSFER_BLOCKED
+
+Operator uploaded AHDA_Gabungan_Sekolah_Peserta_Didik_2026.xlsx and requested
+SMP/MTs first, then SMA/SMK/MA/equivalent. download_file failed "file exceeds the
+executor transfer limit of32MiB". File content/header/hash/counts unavailable;
+DO NOT claim national import/audit PASS or substitute oldpilotresults. Required
+next: operator local inspect-xlsx headerJSON or filtered SMP/MTs workbook parts
+<32MiB without personalstudentdata. OriginalExcel preserved. No alternateupload
+or transfer attempted, no need repeat permission for offline stagedimport.
+
+Implemented explicit school_form priority0 SMP/MTs+listed equivalents,1 upper
+secondary,2unknown/other. No name inference, default excludes2, --include-other
+explicit optin. Mapping example adds school_form placeholder to match actualheader.
+SQLite schema2 jobs.priority+ready partialindex, EXPLAIN confirms indexedorder/no
+TEMPsort. Explicit upgrade only, v1 backup exclusive/activeleaseguard/transactional
+ALTER+classify+index+version+audit, preservescachedrafts/status/facts. Rollbackold
+source requires stoppedDB schema1backup; no WordPressschema/data changes.
+
+New inspect-xlsx reads firstrowassumedheader via boundeddefusedXML ZIP streams,
+sharedstringsonlyneededindices/no fulltable allocation. Caps metadata1MiB,100sheets,
+256cols,16MiBworksheetheader scan,64MiBsharedstring scan; no worksheetrowcountinferred.
+No DBcreated forinspect (--dbunused), no studentdatarows returned. User must verify
+firstrowisheader before sharingmetadata. Importerfullread_only/sharedstringcap stays.
+
+PASS38UNIQUE tests (22previousPython,10newpriority/migration/header,6PHPfacade).
+Initial58PASS accidentallyrediscovered importedoldTestCase; fixedfixtureimport,
+retainedinitiallog and do not inflatecount. Faultmigrationrollsback, backupidempotent,
+activeleaseblocked, stalecontrols/regressions, readyindex plan, mixedNPSNordering,
+unknownformhold, inline/richsharedstrings/privateRows and XXE rejection tested.
+Synthetic1000 mixedlower/upper SQLite PASS;40MBLinuxRSS approx, notWindows555k.
+Oldpilotworkbook (NOTnewnationalfile):177priority0 precede23priority1,200identity
+SQLite drafts, originalhashunchanged, ownDBremoved; no studentsclaims/publishing.
+PluginDirectory/Discovery/helper bytesunchanged, no websitefetch/userWPDB/prodaccess.
+
+Docs COLLECTOR_PRIORITY_2026.md/README upgrade+Windowsheaderinstructions, QA
+collector-priority-2026 logs/bench/order/integrity. Next inspectrealheaders, import
+actualSMPMTs subset10, operatorLocalWPpreview, lawfulsources and descriptionapproval/
+publisher separate. Branch development/collector-2026 continues parent4fafb4ae.
+Do not rebuild/replace frozen200 Tasikmalaya or claim allnationalprofiles enriched.

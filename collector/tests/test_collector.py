@@ -32,7 +32,7 @@ class CollectorTests(unittest.TestCase):
         return c.import_xlsx(self.db,path,'Data',self.mapping,2026,**kwargs)
     def draft(self):
         self.imp([['20515441','SMKN 1 BANDUNG','KAB. TULUNGAGUNG',10,4,6]])
-        out=c.run_jobs(self.db);return out['results'][0]['draft_id']
+        out=c.run_jobs(self.db,include_other=True);return out['results'][0]['draft_id']
     def test_no_accidental_database_creation_or_overwrite(self):
         with self.assertRaises(sqlite3.OperationalError):c.connect(self.root/'missing.sqlite')
         with self.assertRaises(FileExistsError):c.initialize(self.root/'db.sqlite')
@@ -43,12 +43,12 @@ class CollectorTests(unittest.TestCase):
         p=self.book(rows)
         first=c.import_xlsx(self.db,p,'Data',self.mapping,2026,max_rows=3)
         self.assertEqual(first['status'],'paused')
-        blocked=c.run_jobs(self.db)['results'][0];self.assertEqual(blocked['error'],'IMPORT_NOT_COMPLETE')
+        blocked=c.run_jobs(self.db,include_other=True)['results'][0];self.assertEqual(blocked['error'],'IMPORT_NOT_COMPLETE')
         final=c.import_xlsx(self.db,p,'Data',self.mapping,2026)
         self.assertEqual(final['rows_processed'],7)
         self.assertEqual(c.import_xlsx(self.db,p,'Data',self.mapping,2026)['rows_processed'],0)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM observations').fetchone()[0],10)
-        c.run_jobs(self.db,10)
+        c.run_jobs(self.db,10,include_other=True)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM drafts').fetchone()[0],10)
     def test_identity_conflict_and_same_name_distinct_npsn(self):
         self.imp([['10000001','Nama sama','A',1,1,0],['10000002','Nama sama','A',1,1,0],['10000001','Nama berbeda','B',1,1,0]])
@@ -86,15 +86,15 @@ class CollectorTests(unittest.TestCase):
         self.assertIn('DROP TABLE',c.template(c.evidence_snapshot(self.db,'10000001'))['article_text'])
     def test_pause_resume_and_expired_lease_fence(self):
         self.imp([['10000001','Sekolah','A',1,1,0]])
-        c.control(self.db,'pause');self.assertEqual(c.run_jobs(self.db)['results'],[])
+        c.control(self.db,'pause');self.assertEqual(c.run_jobs(self.db,include_other=True)['results'],[])
         c.control(self.db,'resume')
-        with patch.object(c.time,'time',side_effect=[100,161]):out=c.run_jobs(self.db,1)
+        with patch.object(c.time,'time',side_effect=[100,161]):out=c.run_jobs(self.db,1,include_other=True)
         self.assertEqual(out['results'][0]['error'],'LEASE_LOST')
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM drafts').fetchone()[0],0)
-        c.run_jobs(self.db,1);self.assertEqual(self.db.execute('SELECT COUNT(*) FROM drafts').fetchone()[0],1)
+        c.run_jobs(self.db,1,include_other=True);self.assertEqual(self.db.execute('SELECT COUNT(*) FROM drafts').fetchone()[0],1)
     def test_explicit_recovery_and_retry_bound(self):
         self.imp([['10000001','A','A',1,1,0],['10000001','B','A',1,1,0]])
-        for _ in range(5):c.run_jobs(self.db,1)
+        for _ in range(5):c.run_jobs(self.db,1,include_other=True)
         self.assertEqual(dict(self.db.execute('SELECT status,attempts FROM jobs').fetchone()),{'status':'failed','attempts':3})
         c.control(self.db,'retry-failed');self.assertEqual(self.db.execute('SELECT attempts FROM jobs').fetchone()[0],0)
         with self.db:self.db.execute("UPDATE jobs SET status='leased',token='x',leased_until=0")
@@ -103,19 +103,19 @@ class CollectorTests(unittest.TestCase):
         draft=self.draft();payload=self.db.execute('SELECT payload FROM drafts').fetchone()[0]
         with self.db:self.db.execute("UPDATE jobs SET status='queued'")
         # Existing immutable cache is replayed, never overwritten.
-        c.run_jobs(self.db,1)
+        c.run_jobs(self.db,1,include_other=True)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM drafts').fetchone()[0],1)
         self.assertEqual(self.db.execute('SELECT payload FROM drafts').fetchone()[0],payload)
     def test_sql_fault_rolls_back_draft_and_checkpoint(self):
         self.imp([['10000001','A','A',1,1,0]])
         with self.db:self.db.execute("CREATE TRIGGER fail_draft BEFORE INSERT ON drafts BEGIN SELECT RAISE(ABORT,'synthetic fault'); END")
-        result=c.run_jobs(self.db,1)
+        result=c.run_jobs(self.db,1,include_other=True)
         self.assertEqual(result['results'][0]['error'],'INTERNAL_ERROR')
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM drafts').fetchone()[0],0)
         self.assertEqual(self.db.execute('SELECT status FROM jobs').fetchone()[0],'retry_wait')
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM audit WHERE event='draft_saved'").fetchone()[0],0)
         with self.db:self.db.execute('DROP TRIGGER fail_draft')
-        c.run_jobs(self.db,1)
+        c.run_jobs(self.db,1,include_other=True)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM drafts').fetchone()[0],1)
     def test_stale_worker_cannot_complete_replaced_lease(self):
         self.imp([['10000001','A','A',1,1,0]])
@@ -123,7 +123,7 @@ class CollectorTests(unittest.TestCase):
         def replace(snapshot):
             with self.db:self.db.execute("UPDATE jobs SET token='new-owner' WHERE npsn='10000001'")
             return original(snapshot)
-        with patch.object(c,'template',side_effect=replace):result=c.run_jobs(self.db,1)
+        with patch.object(c,'template',side_effect=replace):result=c.run_jobs(self.db,1,include_other=True)
         self.assertEqual(result['results'][0]['error'],'LEASE_LOST')
         self.assertEqual(self.db.execute('SELECT token FROM jobs').fetchone()[0],'new-owner')
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM drafts').fetchone()[0],0)
@@ -133,7 +133,7 @@ class CollectorTests(unittest.TestCase):
         def change(snapshot):
             with self.db:self.db.execute("UPDATE schools SET identity_json=? WHERE npsn='10000001'",(c.canonical({'name':'B','regency':'A'}),))
             return original(snapshot)
-        with patch.object(c,'template',side_effect=change):result=c.run_jobs(self.db,1)
+        with patch.object(c,'template',side_effect=change):result=c.run_jobs(self.db,1,include_other=True)
         self.assertEqual(result['results'][0]['error'],'INPUT_CHANGED_RETRY')
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM drafts').fetchone()[0],0)
     def test_export_stale_rejected_and_existing_file_preserved(self):

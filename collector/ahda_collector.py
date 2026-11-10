@@ -14,6 +14,7 @@ import uuid
 import zipfile
 
 APP_ID = 0x41484441
+SCHEMA_VERSION = 2
 FIELDS = {'npsn', 'name', 'school_form', 'province', 'regency', 'students_total', 'students_male', 'students_female'}
 IDENTITY = ('name', 'school_form', 'province', 'regency')
 
@@ -67,12 +68,162 @@ def count(value):
     return value
 
 
+def school_priority(identity):
+    # Classify only the explicit form field, NEVER guess from the school name.
+    value = identity.get('school_form')
+    form = ' '.join(value.upper().split()) if isinstance(value, str) else ''
+    if form in {'SMP', 'MTS', 'MTSN', 'MTSS', 'SMPLB', 'SMPK', 'SMPTK', 'PAKET B'}:
+        return 0
+    if form in {'SMA', 'SMK', 'MA', 'MAN', 'MAS', 'MAK', 'SMALB', 'SMAK', 'SMTK', 'PAKET C', 'UTAMA WIDYA PASRAMAN'}:
+        return 1
+    return 2  # SLB may span several levels; unknown is not an inferred equivalent.
+
+
+def upgrade(path):
+    # Explicit upgrade only: old databases are not silently migrated by connect.
+    db = sqlite3.connect(Path(path).resolve().as_uri() + '?mode=rw', uri=True, timeout=5)
+    backup = Path(str(path) + '.before-priority-v2.sqlite')
+    try:
+        if db.execute('PRAGMA application_id').fetchone()[0] != APP_ID:
+            raise ValueError('NOT_AHDA_COLLECTOR_DATABASE')
+        version = db.execute('PRAGMA user_version').fetchone()[0]
+        if version == SCHEMA_VERSION:
+            return {'upgraded': False, 'schema_version': version}
+        if version != 1 or [r[1] for r in db.execute('PRAGMA table_info(jobs)')] != ['npsn','status','attempts','token','leased_until','error']:
+            raise ValueError('UNSUPPORTED_OLD_SCHEMA')
+        if db.execute("SELECT 1 FROM jobs WHERE status='leased' LIMIT 1").fetchone():
+            raise ValueError('STOP_AND_RECOVER_OLD_WORKER_BEFORE_UPGRADE')
+        fd = os.open(backup, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.close(fd)
+        with contextlib.closing(sqlite3.connect(backup)) as dest:
+            db.backup(dest)
+        db.execute('BEGIN IMMEDIATE')
+        try:
+            # Recheck after acquiring the migration lock; do not migrate active workers.
+            if db.execute("SELECT 1 FROM jobs WHERE status='leased' LIMIT 1").fetchone():
+                raise ValueError('STOP_AND_RECOVER_OLD_WORKER_BEFORE_UPGRADE')
+            db.execute('ALTER TABLE jobs ADD COLUMN priority INTEGER NOT NULL DEFAULT 2 CHECK(priority IN (0,1,2))')
+            rows = db.execute('SELECT j.npsn,s.identity_json FROM jobs j JOIN schools s ON s.npsn=j.npsn')
+            while True:
+                page = rows.fetchmany(500)
+                if not page:
+                    break
+                db.executemany('UPDATE jobs SET priority=? WHERE npsn=?', [(school_priority(json.loads(identity)), code) for code,identity in page])
+            db.execute("CREATE INDEX jobs_ready_priority ON jobs(priority,npsn) WHERE status IN ('queued','retry_wait') AND attempts<3")
+            db.execute('PRAGMA user_version=2')
+            audit(db, 'priority_schema_upgrade', {'from': 1, 'to': 2})
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
+        return {'upgraded': True, 'schema_version': 2, 'backup': str(backup), 'wordpress_writes': 0}
+    finally:
+        db.close()
+
+
+def inspect_xlsx(path):
+    # Header inspection avoids openpyxl's full shared-string table allocation.
+    from defusedxml.ElementTree import fromstring, iterparse
+    import posixpath
+    ns = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
+    class BoundedReader:
+        def __init__(self, stream, limit):
+            self.stream, self.remaining = stream, limit
+        def read(self, size=-1):
+            if self.remaining <= 0:
+                raise ValueError('HEADER_XML_SCAN_LIMIT_SPLIT_WORKBOOK')
+            block = self.stream.read(min(65536, self.remaining, size) if size >= 0 else min(65536, self.remaining))
+            self.remaining -= len(block)
+            return block
+    summaries = []
+    wanted = set()
+    with zipfile.ZipFile(path) as book:
+        names = book.namelist()
+        if len(names) > 10000 or len(names) != len(set(names)):
+            raise ValueError('WORKBOOK_MEMBER_COUNT_OR_DUPLICATES')
+        def metadata(name):
+            if book.getinfo(name).file_size > 1048576:
+                raise ValueError('WORKBOOK_METADATA_LIMIT')
+            return fromstring(book.read(name))
+        relations = {r.attrib['Id']: r.attrib for r in metadata('xl/_rels/workbook.xml.rels')}
+        sheets = list(metadata('xl/workbook.xml').iter(ns+'sheet'))
+        if len(sheets)>100:
+            raise ValueError('HEADER_SHEET_LIMIT')
+        for sheet in sheets:
+            rel = relations.get(sheet.attrib.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id'), {})
+            if rel.get('TargetMode') == 'External' or not rel.get('Type', '').endswith('/worksheet'):
+                continue
+            target = rel.get('Target', '')
+            name = target.lstrip('/') if target.startswith('/') else posixpath.normpath(posixpath.join('xl', target))
+            if not name.startswith('xl/') or '..' in name.split('/') or name not in names:
+                raise ValueError('INVALID_WORKSHEET_REFERENCE')
+            headers = []
+            header_row = None
+            with book.open(name) as raw:
+                for event, elem in iterparse(BoundedReader(raw, 16*1024*1024), events=('end',)):
+                    if elem.tag != ns+'row':
+                        continue
+                    header_row = elem.attrib.get('r')
+                    for cell in elem.findall(ns+'c'):
+                        match = re.fullmatch(r'([A-Z]+)[0-9]+', cell.attrib.get('r', ''))
+                        if not match:
+                            raise ValueError('HEADER_CELL_REFERENCE_INVALID')
+                        column = 0
+                        for letter in match.group(1):
+                            column = column*26 + ord(letter)-64
+                        if not 1 <= column <= 256:
+                            raise ValueError('TOO_MANY_HEADER_COLUMNS')
+                        while len(headers) < column:
+                            headers.append(None)
+                        if cell.find(ns+'f') is not None:
+                            raise ValueError('FORMULA_HEADER_NOT_SUPPORTED')
+                        value = cell.findtext(ns+'v')
+                        if cell.attrib.get('t') == 's':
+                            if value is None or not re.fullmatch(r'[0-9]{1,9}', value):
+                                raise ValueError('INVALID_SHARED_STRING_INDEX')
+                            index = int(value); wanted.add(index); value = {'shared_string_index': index}
+                        elif cell.attrib.get('t') == 'inlineStr':
+                            value = ''.join(t.text or '' for t in cell.iter(ns+'t'))
+                        if isinstance(value, str) and len(value) > 2000:
+                            raise ValueError('HEADER_TEXT_LIMIT')
+                        headers[column-1] = value
+                    break  # First populated row only, not data rows.
+            summaries.append({'sheet': sheet.attrib.get('name'), 'first_row_assumed_header': header_row,
+                              'declared_rows_unverified': None, 'headers': headers})
+        if not summaries:
+            raise ValueError('NO_SUPPORTED_WORKSHEETS')
+        strings = {}
+        if wanted:
+            with book.open('xl/sharedStrings.xml') as raw:
+                stream = iterparse(BoundedReader(raw, 64*1024*1024), events=('start','end'))
+                _, root = next(stream)
+                index = 0
+                for event, elem in stream:
+                    if event == 'end' and elem.tag == ns+'si':
+                        if index in wanted:
+                            text = ''.join(t.text or '' for t in elem.iter(ns+'t'))
+                            if len(text) > 2000:
+                                raise ValueError('HEADER_TEXT_LIMIT')
+                            strings[index] = text
+                        index += 1
+                        root.clear()
+                        if len(strings) == len(wanted):
+                            break
+            if len(strings) != len(wanted):
+                raise ValueError('HEADER_SHARED_STRING_MISSING')
+        for summary in summaries:
+            summary['headers'] = [strings[v['shared_string_index']] if isinstance(v, dict) else v for v in summary['headers']]
+    return {'file_sha256': file_hash(path), 'sheets': summaries, 'data_rows_read': 0,
+            'note': 'Only first row of each worksheet, assumed to be headers; no data counts inferred. Confirm no personal data before sharing.',
+            'network_requests': 0, 'wordpress_writes': 0}
+
+
 def connect(path):
     db = sqlite3.connect(Path(path).resolve().as_uri() + '?mode=rw', uri=True, timeout=5)
     db.row_factory = sqlite3.Row
-    if db.execute('PRAGMA application_id').fetchone()[0] != APP_ID or db.execute('PRAGMA user_version').fetchone()[0] != 1:
+    if db.execute('PRAGMA application_id').fetchone()[0] != APP_ID or db.execute('PRAGMA user_version').fetchone()[0] != SCHEMA_VERSION:
         db.close()
-        raise ValueError('NOT_AHDA_COLLECTOR_DATABASE')
+        raise ValueError('NOT_CURRENT_AHDA_DATABASE_USE_UPGRADE_FOR_V1')
     db.execute('PRAGMA foreign_keys=ON')
     db.execute('PRAGMA cache_size=-8192')
     return db
@@ -84,7 +235,7 @@ def initialize(path):
     db = sqlite3.connect(path)
     try:
         db.executescript(f'''
-        PRAGMA application_id={APP_ID}; PRAGMA user_version=1;
+        PRAGMA application_id={APP_ID}; PRAGMA user_version={SCHEMA_VERSION};
         CREATE TABLE imports(id TEXT PRIMARY KEY, file_sha256 TEXT NOT NULL, sheet TEXT NOT NULL,
           mapping TEXT NOT NULL, year INTEGER NOT NULL, source_url TEXT, cursor INTEGER NOT NULL DEFAULT 1,
           status TEXT NOT NULL, rows_seen INTEGER NOT NULL DEFAULT 0);
@@ -93,7 +244,9 @@ def initialize(path):
           npsn TEXT, facts_json TEXT NOT NULL, issues_json TEXT NOT NULL, PRIMARY KEY(import_id,row_number));
         CREATE INDEX observations_npsn ON observations(npsn);
         CREATE TABLE jobs(npsn TEXT PRIMARY KEY REFERENCES schools(npsn), status TEXT NOT NULL DEFAULT 'queued',
-          attempts INTEGER NOT NULL DEFAULT 0, token TEXT, leased_until INTEGER, error TEXT);
+          attempts INTEGER NOT NULL DEFAULT 0, token TEXT, leased_until INTEGER, error TEXT,
+          priority INTEGER NOT NULL DEFAULT 2 CHECK(priority IN (0,1,2)));
+        CREATE INDEX jobs_ready_priority ON jobs(priority,npsn) WHERE status IN ('queued','retry_wait') AND attempts<3;
         CREATE TABLE drafts(id TEXT PRIMARY KEY,npsn TEXT NOT NULL REFERENCES schools(npsn),
           input_hash TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending_review',
           created_at TEXT NOT NULL, UNIQUE(npsn,input_hash));
@@ -246,7 +399,9 @@ def import_xlsx(db, path, sheet, mapping, year, source_url=None, max_rows=10000)
                             db.execute('UPDATE schools SET identity_json=? WHERE npsn=?', (canonical(previous), code))
                     else:
                         db.execute('INSERT INTO schools(npsn,identity_json) VALUES(?,?)', (code, canonical(identity)))
-                    db.execute("INSERT INTO jobs(npsn) VALUES(?) ON CONFLICT(npsn) DO UPDATE SET status=CASE WHEN status='leased' THEN status ELSE 'queued' END,attempts=CASE WHEN status='leased' THEN attempts ELSE 0 END", (code,))
+                    stored = db.execute('SELECT identity_json FROM schools WHERE npsn=?', (code,)).fetchone()
+                    priority = school_priority(json.loads(stored[0]))
+                    db.execute("INSERT INTO jobs(npsn,priority) VALUES(?,?) ON CONFLICT(npsn) DO UPDATE SET priority=excluded.priority,status=CASE WHEN status='leased' THEN status ELSE 'queued' END,attempts=CASE WHEN status='leased' THEN attempts ELSE 0 END", (code,priority))
                 db.execute('INSERT INTO observations VALUES(?,?,?,?,?)', (import_id, row_number, code, canonical(facts), canonical(issues)))
                 db.execute('UPDATE imports SET cursor=?,rows_seen=rows_seen+1,status=? WHERE id=?', (row_number, 'running', import_id))
             processed += 1
@@ -312,7 +467,7 @@ def template(snapshot):
             'note': 'Draf berdasarkan berkas operator; bukan verifikasi pemerintah, artikel lengkap, atau persetujuan publikasi.'}
 
 
-def run_jobs(db, limit=10):
+def run_jobs(db, limit=10, include_other=False):
     if not 1 <= limit <= 100:
         raise ValueError('BATCH_LIMIT_1_TO_100')
     results = []
@@ -322,7 +477,8 @@ def run_jobs(db, limit=10):
             if db.execute("SELECT value FROM settings WHERE key='paused'").fetchone()[0] == '1':
                 db.rollback()
                 break
-            row = db.execute("SELECT * FROM jobs WHERE status IN ('queued','retry_wait') AND attempts<3 ORDER BY npsn LIMIT 1").fetchone()
+            clause = '' if include_other else ' AND priority<=1'
+            row = db.execute("SELECT * FROM jobs WHERE status IN ('queued','retry_wait') AND attempts<3" + clause + " ORDER BY priority,npsn LIMIT 1").fetchone()
             if not row:
                 db.rollback()
                 break
@@ -451,11 +607,13 @@ def main(argv=None):
     parser.add_argument('--db', required=True)
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('init')
+    commands.add_parser('upgrade')
+    inspect = commands.add_parser('inspect-xlsx'); inspect.add_argument('--file', required=True)
     imp = commands.add_parser('import-xlsx')
     imp.add_argument('--file', required=True); imp.add_argument('--sheet', required=True)
     imp.add_argument('--mapping', required=True); imp.add_argument('--year', required=True, type=int)
     imp.add_argument('--source-url'); imp.add_argument('--max-rows', type=int, default=10000)
-    gen = commands.add_parser('run'); gen.add_argument('--limit', type=int, default=10)
+    gen = commands.add_parser('run'); gen.add_argument('--limit', type=int, default=10); gen.add_argument('--include-other', action='store_true')
     ctl = commands.add_parser('control'); ctl.add_argument('action', choices=['pause', 'resume', 'recover', 'retry-failed'])
     commands.add_parser('report')
     issues = commands.add_parser('issues'); issues.add_argument('--after', type=int, default=0); issues.add_argument('--limit', type=int, default=25)
@@ -463,6 +621,10 @@ def main(argv=None):
     src = commands.add_parser('source-add'); src.add_argument('--npsn', required=True); src.add_argument('--url', required=True); src.add_argument('--kind', required=True, choices=['government', 'school_website'])
     exp = commands.add_parser('export-draft'); exp.add_argument('--draft-id', required=True); exp.add_argument('--output', required=True)
     args = parser.parse_args(argv)
+    if args.command == 'inspect-xlsx':
+        return inspect_xlsx(args.file)
+    if args.command == 'upgrade':
+        return upgrade(args.db)
     if args.command == 'init':
         initialize(args.db)
         return {'initialized': True, 'wordpress_writes': 0}
@@ -484,13 +646,15 @@ def main(argv=None):
         if args.command == 'source-add':
             return add_source(db, args.npsn, args.url, args.kind)
         if args.command == 'run':
-            return run_jobs(db, args.limit)
+            return run_jobs(db, args.limit, args.include_other)
         if args.command == 'control':
             control(db, args.action)
             return {'action': args.action}
         if args.command == 'export-draft':
             return export_draft(db, args.draft_id, args.output)
         return {'schools': db.execute('SELECT COUNT(*) FROM schools').fetchone()[0],
+                'queue_priority': [dict(r) for r in db.execute('SELECT priority,status,COUNT(*) AS count FROM jobs GROUP BY priority,status ORDER BY priority,status')],
+                'priority_meaning': {'0': 'SMP/MTs and listed equivalents', '1': 'SMA/SMK/MA and listed equivalents', '2': 'Other or missing/unknown form; excluded unless --include-other'},
                 'identity_conflicts': db.execute('SELECT COUNT(*) FROM schools WHERE conflict=1').fetchone()[0],
                 'jobs': dict(db.execute('SELECT status,COUNT(*) FROM jobs GROUP BY status').fetchall()),
                 'imports': [dict(r) for r in db.execute('SELECT id,status,cursor,rows_seen FROM imports ORDER BY id')],

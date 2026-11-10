@@ -1,0 +1,565 @@
+--- a/collector/README.md
++++ b/collector/README.md
+@@ -1,4 +1,4 @@
+-# AHDA Collector offline — pratinjau pengembangan 2026.1
++# AHDA Collector offline — pratinjau pengembangan 2026.2
+ 
+ Collector ini menambahkan pengolahan Excel dan draf ke proyek AHDA yang ada.
+ Plugin Directory 0.8.9 dan Discovery 7.18 tidak diubah. Collector tidak membuat
+@@ -13,6 +13,36 @@
+ penerbitan `profile_description`, artikel lengkap, serta uji nyata 10 profil LocalWP.
+ Excel gabungan nasional 2026 belum tersedia untuk diuji. Memasang ZIP Discovery
+ saja tidak menjalankan Collector atau mengubah halaman sekolah.
++
++## Prioritas jenjang — versi 2026.2
++
++Antrean sekarang memproses **SMP/MTs dahulu**, kemudian **SMA/SMK/MA**.
++Dalam setiap kelompok, urutan NPSN tetap deterministik. Klasifikasi memakai
++`school_form` yang dipetakan dari kolom bentuk pendidikan, bukan nama sekolah.
++Contoh mapping siswa kini menyertakan `school_form: Bentuk Pendidikan`; sesuaikan
++header itu dengan Excel aktual. Tanpa kolom tersebut, jenjang dianggap belum diketahui.
++
++Padanan yang didukung secara eksplisit: SMPLB/SMPK/SMPTK/Paket B pada kelompok
++pertama; SMALB/SMAK/SMTK/MAK/Paket C/Utama Widya Pasraman pada kelompok kedua.
++MTsN/MTsS dan MAN/MAS dikenali sebagai label bentuk, bukan penetapan status negeri.
++SLB yang tidak menyebut jenjang, bentuk asing, SD/TK, serta nilai kosong tidak
++masuk run default. `run --include-other` hanya untuk keputusan operator yang sengaja
++ingin memproses kelompok lain setelah dua kelompok prioritas.
++
++Database baru memakai schema SQLite2. Jika sudah membuat database dengan Collector
++2026.1, hentikan semua worker dan selesaikan/recover lease memakai source lama dahulu.
++Simpan backup source, lalu jalankan dengan source baru:
++
++```bat
++.venv\Scripts\python.exe ahda_collector.py --db ahda2026.sqlite upgrade
++```
++
++Upgrade membuat `ahda2026.sqlite.before-priority-v2.sqlite`, mempertahankan sekolah,
++fakta, draf dan status, lalu menambah prioritas dan indeks antrean. Lease aktif dan
++backup dengan nama sama ditolak. Tidak ada migrasi diam-diam saat connect.
++Jika upgrade gagal, simpan backup untuk pemeriksaan, jangan menghapusnya agar bisa
++memaksa retry. Rollback ke source2026.1 memerlukan backup database schema1 ketika
++semua proses berhenti; source lama tidak boleh dipakai pada schema2.
+ 
+ ## Instalasi Windows
+ 
+@@ -37,8 +67,28 @@
+ 
+ ## Menyiapkan Excel dan mapping
+ 
+-File gabungan sekolah dan agregat peserta didik 2026 yang dimaksud operator belum
+-tersedia di workspace ini. Header harus diperiksa pada file aktual. Collector
++Unggahan `AHDA_Gabungan_Sekolah_Peserta_Didik_2026.xlsx` melebihi batas transfer
++alat cloud 32 MiB; belum dibaca atau dihitung. File aslinya dapat diperiksa di Windows
++menggunakan source ini. Salin file ke path contoh atau sesuaikan parameter:
++
++```bat
++.venv\Scripts\python.exe -X utf8 ahda_collector.py --db unused inspect-xlsx --file "C:\AHDA\AHDA_Gabungan_Sekolah_Peserta_Didik_2026.xlsx" > header-2026.json
++```
++
++Perintah tidak membuat database. Ia membaca baris pertama setiap worksheet sebagai
++calon header; bukan baris data, dan tidak menyimpulkan jumlah sekolah dari dimensi.
++Periksa `header-2026.json` sebelum membagikannya: jika baris pertama ternyata data
++pribadi, jangan kirim. Shared strings dipindai streaming hanya untuk indeks header,
++dengan batas scan 64 MiB, header worksheet 16 MiB, dan maksimal 100 sheet. Jika batas
++tercapai, pisahkan workbook; jangan menurunkan pengamanan XML.
++
++Untuk pengujian cloud pada data aktual, simpan salinan terfilter **SMP/MTs dahulu**
++dengan header utuh dan ukuran tiap file di bawah 32 MiB. Jangan unggah data pribadi
++siswa. File sumber asli tetap dipertahankan. Pemeriksaan header ringan ini tidak
++mengubah batas memori importer penuh di bawah.
++
++Isi file gabungan sekolah dan agregat peserta didik 2026 belum dapat ditransfer
++ke workspace karena batas ukuran alat. Header harus diperiksa pada file aktual. Collector
+ memerlukan header pada baris pertama, sheet yang dipilih secara eksplisit, dan
+ mapping JSON. Tidak ada pencocokan sekolah berdasarkan nama.
+ 
+@@ -169,7 +219,7 @@
+ LocalWP. Pengukuran Linux untuk 1.000 baris sekitar 38 MiB peak RSS; jangan
+ mengekstrapolasikannya menjadi jaminan Windows atau 555.000 sekolah.
+ 
+-Bukti: `docs/qa/collector-2026` pada branch. Audit: `docs/COLLECTOR_AUDIT_2026.md`.
++Bukti awal: `docs/qa/collector-2026`; bukti prioritas terbaru: `docs/qa/collector-priority-2026` pada branch. Audit: `docs/COLLECTOR_AUDIT_2026.md`.
+ Checkpoint: `docs/PROGRESS.md`. Rollback dengan menghentikan Collector lalu memakai
+ source dan backup SQLite sebelumnya. Tidak ada perubahan profil WordPress untuk
+ di-undo oleh Collector ini. Ranking Google atau rekomendasi AI tidak dijanjikan.
+--- a/collector/ahda_collector.py
++++ b/collector/ahda_collector.py
+@@ -14,6 +14,7 @@
+ import zipfile
+ 
+ APP_ID = 0x41484441
++SCHEMA_VERSION = 2
+ FIELDS = {'npsn', 'name', 'school_form', 'province', 'regency', 'students_total', 'students_male', 'students_female'}
+ IDENTITY = ('name', 'school_form', 'province', 'regency')
+ 
+@@ -67,12 +68,162 @@
+     return value
+ 
+ 
++def school_priority(identity):
++    # Classify only the explicit form field, NEVER guess from the school name.
++    value = identity.get('school_form')
++    form = ' '.join(value.upper().split()) if isinstance(value, str) else ''
++    if form in {'SMP', 'MTS', 'MTSN', 'MTSS', 'SMPLB', 'SMPK', 'SMPTK', 'PAKET B'}:
++        return 0
++    if form in {'SMA', 'SMK', 'MA', 'MAN', 'MAS', 'MAK', 'SMALB', 'SMAK', 'SMTK', 'PAKET C', 'UTAMA WIDYA PASRAMAN'}:
++        return 1
++    return 2  # SLB may span several levels; unknown is not an inferred equivalent.
++
++
++def upgrade(path):
++    # Explicit upgrade only: old databases are not silently migrated by connect.
++    db = sqlite3.connect(Path(path).resolve().as_uri() + '?mode=rw', uri=True, timeout=5)
++    backup = Path(str(path) + '.before-priority-v2.sqlite')
++    try:
++        if db.execute('PRAGMA application_id').fetchone()[0] != APP_ID:
++            raise ValueError('NOT_AHDA_COLLECTOR_DATABASE')
++        version = db.execute('PRAGMA user_version').fetchone()[0]
++        if version == SCHEMA_VERSION:
++            return {'upgraded': False, 'schema_version': version}
++        if version != 1 or [r[1] for r in db.execute('PRAGMA table_info(jobs)')] != ['npsn','status','attempts','token','leased_until','error']:
++            raise ValueError('UNSUPPORTED_OLD_SCHEMA')
++        if db.execute("SELECT 1 FROM jobs WHERE status='leased' LIMIT 1").fetchone():
++            raise ValueError('STOP_AND_RECOVER_OLD_WORKER_BEFORE_UPGRADE')
++        fd = os.open(backup, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
++        os.close(fd)
++        with contextlib.closing(sqlite3.connect(backup)) as dest:
++            db.backup(dest)
++        db.execute('BEGIN IMMEDIATE')
++        try:
++            # Recheck after acquiring the migration lock; do not migrate active workers.
++            if db.execute("SELECT 1 FROM jobs WHERE status='leased' LIMIT 1").fetchone():
++                raise ValueError('STOP_AND_RECOVER_OLD_WORKER_BEFORE_UPGRADE')
++            db.execute('ALTER TABLE jobs ADD COLUMN priority INTEGER NOT NULL DEFAULT 2 CHECK(priority IN (0,1,2))')
++            rows = db.execute('SELECT j.npsn,s.identity_json FROM jobs j JOIN schools s ON s.npsn=j.npsn')
++            while True:
++                page = rows.fetchmany(500)
++                if not page:
++                    break
++                db.executemany('UPDATE jobs SET priority=? WHERE npsn=?', [(school_priority(json.loads(identity)), code) for code,identity in page])
++            db.execute("CREATE INDEX jobs_ready_priority ON jobs(priority,npsn) WHERE status IN ('queued','retry_wait') AND attempts<3")
++            db.execute('PRAGMA user_version=2')
++            audit(db, 'priority_schema_upgrade', {'from': 1, 'to': 2})
++            db.commit()
++        except BaseException:
++            db.rollback()
++            raise
++        return {'upgraded': True, 'schema_version': 2, 'backup': str(backup), 'wordpress_writes': 0}
++    finally:
++        db.close()
++
++
++def inspect_xlsx(path):
++    # Header inspection avoids openpyxl's full shared-string table allocation.
++    from defusedxml.ElementTree import fromstring, iterparse
++    import posixpath
++    ns = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
++    class BoundedReader:
++        def __init__(self, stream, limit):
++            self.stream, self.remaining = stream, limit
++        def read(self, size=-1):
++            if self.remaining <= 0:
++                raise ValueError('HEADER_XML_SCAN_LIMIT_SPLIT_WORKBOOK')
++            block = self.stream.read(min(65536, self.remaining, size) if size >= 0 else min(65536, self.remaining))
++            self.remaining -= len(block)
++            return block
++    summaries = []
++    wanted = set()
++    with zipfile.ZipFile(path) as book:
++        names = book.namelist()
++        if len(names) > 10000 or len(names) != len(set(names)):
++            raise ValueError('WORKBOOK_MEMBER_COUNT_OR_DUPLICATES')
++        def metadata(name):
++            if book.getinfo(name).file_size > 1048576:
++                raise ValueError('WORKBOOK_METADATA_LIMIT')
++            return fromstring(book.read(name))
++        relations = {r.attrib['Id']: r.attrib for r in metadata('xl/_rels/workbook.xml.rels')}
++        sheets = list(metadata('xl/workbook.xml').iter(ns+'sheet'))
++        if len(sheets)>100:
++            raise ValueError('HEADER_SHEET_LIMIT')
++        for sheet in sheets:
++            rel = relations.get(sheet.attrib.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id'), {})
++            if rel.get('TargetMode') == 'External' or not rel.get('Type', '').endswith('/worksheet'):
++                continue
++            target = rel.get('Target', '')
++            name = target.lstrip('/') if target.startswith('/') else posixpath.normpath(posixpath.join('xl', target))
++            if not name.startswith('xl/') or '..' in name.split('/') or name not in names:
++                raise ValueError('INVALID_WORKSHEET_REFERENCE')
++            headers = []
++            header_row = None
++            with book.open(name) as raw:
++                for event, elem in iterparse(BoundedReader(raw, 16*1024*1024), events=('end',)):
++                    if elem.tag != ns+'row':
++                        continue
++                    header_row = elem.attrib.get('r')
++                    for cell in elem.findall(ns+'c'):
++                        match = re.fullmatch(r'([A-Z]+)[0-9]+', cell.attrib.get('r', ''))
++                        if not match:
++                            raise ValueError('HEADER_CELL_REFERENCE_INVALID')
++                        column = 0
++                        for letter in match.group(1):
++                            column = column*26 + ord(letter)-64
++                        if not 1 <= column <= 256:
++                            raise ValueError('TOO_MANY_HEADER_COLUMNS')
++                        while len(headers) < column:
++                            headers.append(None)
++                        if cell.find(ns+'f') is not None:
++                            raise ValueError('FORMULA_HEADER_NOT_SUPPORTED')
++                        value = cell.findtext(ns+'v')
++                        if cell.attrib.get('t') == 's':
++                            if value is None or not re.fullmatch(r'[0-9]{1,9}', value):
++                                raise ValueError('INVALID_SHARED_STRING_INDEX')
++                            index = int(value); wanted.add(index); value = {'shared_string_index': index}
++                        elif cell.attrib.get('t') == 'inlineStr':
++                            value = ''.join(t.text or '' for t in cell.iter(ns+'t'))
++                        if isinstance(value, str) and len(value) > 2000:
++                            raise ValueError('HEADER_TEXT_LIMIT')
++                        headers[column-1] = value
++                    break  # First populated row only, not data rows.
++            summaries.append({'sheet': sheet.attrib.get('name'), 'first_row_assumed_header': header_row,
++                              'declared_rows_unverified': None, 'headers': headers})
++        if not summaries:
++            raise ValueError('NO_SUPPORTED_WORKSHEETS')
++        strings = {}
++        if wanted:
++            with book.open('xl/sharedStrings.xml') as raw:
++                stream = iterparse(BoundedReader(raw, 64*1024*1024), events=('start','end'))
++                _, root = next(stream)
++                index = 0
++                for event, elem in stream:
++                    if event == 'end' and elem.tag == ns+'si':
++                        if index in wanted:
++                            text = ''.join(t.text or '' for t in elem.iter(ns+'t'))
++                            if len(text) > 2000:
++                                raise ValueError('HEADER_TEXT_LIMIT')
++                            strings[index] = text
++                        index += 1
++                        root.clear()
++                        if len(strings) == len(wanted):
++                            break
++            if len(strings) != len(wanted):
++                raise ValueError('HEADER_SHARED_STRING_MISSING')
++        for summary in summaries:
++            summary['headers'] = [strings[v['shared_string_index']] if isinstance(v, dict) else v for v in summary['headers']]
++    return {'file_sha256': file_hash(path), 'sheets': summaries, 'data_rows_read': 0,
++            'note': 'Only first row of each worksheet, assumed to be headers; no data counts inferred. Confirm no personal data before sharing.',
++            'network_requests': 0, 'wordpress_writes': 0}
++
++
+ def connect(path):
+     db = sqlite3.connect(Path(path).resolve().as_uri() + '?mode=rw', uri=True, timeout=5)
+     db.row_factory = sqlite3.Row
+-    if db.execute('PRAGMA application_id').fetchone()[0] != APP_ID or db.execute('PRAGMA user_version').fetchone()[0] != 1:
++    if db.execute('PRAGMA application_id').fetchone()[0] != APP_ID or db.execute('PRAGMA user_version').fetchone()[0] != SCHEMA_VERSION:
+         db.close()
+-        raise ValueError('NOT_AHDA_COLLECTOR_DATABASE')
++        raise ValueError('NOT_CURRENT_AHDA_DATABASE_USE_UPGRADE_FOR_V1')
+     db.execute('PRAGMA foreign_keys=ON')
+     db.execute('PRAGMA cache_size=-8192')
+     return db
+@@ -84,7 +235,7 @@
+     db = sqlite3.connect(path)
+     try:
+         db.executescript(f'''
+-        PRAGMA application_id={APP_ID}; PRAGMA user_version=1;
++        PRAGMA application_id={APP_ID}; PRAGMA user_version={SCHEMA_VERSION};
+         CREATE TABLE imports(id TEXT PRIMARY KEY, file_sha256 TEXT NOT NULL, sheet TEXT NOT NULL,
+           mapping TEXT NOT NULL, year INTEGER NOT NULL, source_url TEXT, cursor INTEGER NOT NULL DEFAULT 1,
+           status TEXT NOT NULL, rows_seen INTEGER NOT NULL DEFAULT 0);
+@@ -93,7 +244,9 @@
+           npsn TEXT, facts_json TEXT NOT NULL, issues_json TEXT NOT NULL, PRIMARY KEY(import_id,row_number));
+         CREATE INDEX observations_npsn ON observations(npsn);
+         CREATE TABLE jobs(npsn TEXT PRIMARY KEY REFERENCES schools(npsn), status TEXT NOT NULL DEFAULT 'queued',
+-          attempts INTEGER NOT NULL DEFAULT 0, token TEXT, leased_until INTEGER, error TEXT);
++          attempts INTEGER NOT NULL DEFAULT 0, token TEXT, leased_until INTEGER, error TEXT,
++          priority INTEGER NOT NULL DEFAULT 2 CHECK(priority IN (0,1,2)));
++        CREATE INDEX jobs_ready_priority ON jobs(priority,npsn) WHERE status IN ('queued','retry_wait') AND attempts<3;
+         CREATE TABLE drafts(id TEXT PRIMARY KEY,npsn TEXT NOT NULL REFERENCES schools(npsn),
+           input_hash TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending_review',
+           created_at TEXT NOT NULL, UNIQUE(npsn,input_hash));
+@@ -246,7 +399,9 @@
+                             db.execute('UPDATE schools SET identity_json=? WHERE npsn=?', (canonical(previous), code))
+                     else:
+                         db.execute('INSERT INTO schools(npsn,identity_json) VALUES(?,?)', (code, canonical(identity)))
+-                    db.execute("INSERT INTO jobs(npsn) VALUES(?) ON CONFLICT(npsn) DO UPDATE SET status=CASE WHEN status='leased' THEN status ELSE 'queued' END,attempts=CASE WHEN status='leased' THEN attempts ELSE 0 END", (code,))
++                    stored = db.execute('SELECT identity_json FROM schools WHERE npsn=?', (code,)).fetchone()
++                    priority = school_priority(json.loads(stored[0]))
++                    db.execute("INSERT INTO jobs(npsn,priority) VALUES(?,?) ON CONFLICT(npsn) DO UPDATE SET priority=excluded.priority,status=CASE WHEN status='leased' THEN status ELSE 'queued' END,attempts=CASE WHEN status='leased' THEN attempts ELSE 0 END", (code,priority))
+                 db.execute('INSERT INTO observations VALUES(?,?,?,?,?)', (import_id, row_number, code, canonical(facts), canonical(issues)))
+                 db.execute('UPDATE imports SET cursor=?,rows_seen=rows_seen+1,status=? WHERE id=?', (row_number, 'running', import_id))
+             processed += 1
+@@ -312,7 +467,7 @@
+             'note': 'Draf berdasarkan berkas operator; bukan verifikasi pemerintah, artikel lengkap, atau persetujuan publikasi.'}
+ 
+ 
+-def run_jobs(db, limit=10):
++def run_jobs(db, limit=10, include_other=False):
+     if not 1 <= limit <= 100:
+         raise ValueError('BATCH_LIMIT_1_TO_100')
+     results = []
+@@ -322,7 +477,8 @@
+             if db.execute("SELECT value FROM settings WHERE key='paused'").fetchone()[0] == '1':
+                 db.rollback()
+                 break
+-            row = db.execute("SELECT * FROM jobs WHERE status IN ('queued','retry_wait') AND attempts<3 ORDER BY npsn LIMIT 1").fetchone()
++            clause = '' if include_other else ' AND priority<=1'
++            row = db.execute("SELECT * FROM jobs WHERE status IN ('queued','retry_wait') AND attempts<3" + clause + " ORDER BY priority,npsn LIMIT 1").fetchone()
+             if not row:
+                 db.rollback()
+                 break
+@@ -451,11 +607,13 @@
+     parser.add_argument('--db', required=True)
+     commands = parser.add_subparsers(dest='command', required=True)
+     commands.add_parser('init')
++    commands.add_parser('upgrade')
++    inspect = commands.add_parser('inspect-xlsx'); inspect.add_argument('--file', required=True)
+     imp = commands.add_parser('import-xlsx')
+     imp.add_argument('--file', required=True); imp.add_argument('--sheet', required=True)
+     imp.add_argument('--mapping', required=True); imp.add_argument('--year', required=True, type=int)
+     imp.add_argument('--source-url'); imp.add_argument('--max-rows', type=int, default=10000)
+-    gen = commands.add_parser('run'); gen.add_argument('--limit', type=int, default=10)
++    gen = commands.add_parser('run'); gen.add_argument('--limit', type=int, default=10); gen.add_argument('--include-other', action='store_true')
+     ctl = commands.add_parser('control'); ctl.add_argument('action', choices=['pause', 'resume', 'recover', 'retry-failed'])
+     commands.add_parser('report')
+     issues = commands.add_parser('issues'); issues.add_argument('--after', type=int, default=0); issues.add_argument('--limit', type=int, default=25)
+@@ -463,6 +621,10 @@
+     src = commands.add_parser('source-add'); src.add_argument('--npsn', required=True); src.add_argument('--url', required=True); src.add_argument('--kind', required=True, choices=['government', 'school_website'])
+     exp = commands.add_parser('export-draft'); exp.add_argument('--draft-id', required=True); exp.add_argument('--output', required=True)
+     args = parser.parse_args(argv)
++    if args.command == 'inspect-xlsx':
++        return inspect_xlsx(args.file)
++    if args.command == 'upgrade':
++        return upgrade(args.db)
+     if args.command == 'init':
+         initialize(args.db)
+         return {'initialized': True, 'wordpress_writes': 0}
+@@ -484,13 +646,15 @@
+         if args.command == 'source-add':
+             return add_source(db, args.npsn, args.url, args.kind)
+         if args.command == 'run':
+-            return run_jobs(db, args.limit)
++            return run_jobs(db, args.limit, args.include_other)
+         if args.command == 'control':
+             control(db, args.action)
+             return {'action': args.action}
+         if args.command == 'export-draft':
+             return export_draft(db, args.draft_id, args.output)
+         return {'schools': db.execute('SELECT COUNT(*) FROM schools').fetchone()[0],
++                'queue_priority': [dict(r) for r in db.execute('SELECT priority,status,COUNT(*) AS count FROM jobs GROUP BY priority,status ORDER BY priority,status')],
++                'priority_meaning': {'0': 'SMP/MTs and listed equivalents', '1': 'SMA/SMK/MA and listed equivalents', '2': 'Other or missing/unknown form; excluded unless --include-other'},
+                 'identity_conflicts': db.execute('SELECT COUNT(*) FROM schools WHERE conflict=1').fetchone()[0],
+                 'jobs': dict(db.execute('SELECT status,COUNT(*) FROM jobs GROUP BY status').fetchall()),
+                 'imports': [dict(r) for r in db.execute('SELECT id,status,cursor,rows_seen FROM imports ORDER BY id')],
+--- a/collector/examples/mapping-with-students.json
++++ b/collector/examples/mapping-with-students.json
+@@ -4,5 +4,6 @@
+   "regency": "Kabupaten/Kota",
+   "students_total": "Jumlah Peserta Didik",
+   "students_male": "Peserta Didik Laki-Laki",
+-  "students_female": "Peserta Didik Perempuan"
++  "students_female": "Peserta Didik Perempuan",
++  "school_form": "Bentuk Pendidikan"
+ }
+--- a/collector/tests/benchmark.py
++++ b/collector/tests/benchmark.py
+@@ -13,11 +13,11 @@
+ assert 1<=a.rows<=10000
+ with tempfile.TemporaryDirectory() as tmp:
+     root=Path(tmp);w=openpyxl.Workbook(write_only=True);s=w.create_sheet('Synthetic')
+-    s.append(['NPSN','Nama','Total','L','P'])
+-    for i in range(a.rows):s.append([str(10000000+i),'SYNTHETIC SCHOOL '+str(i),100,50,50])
++    s.append(['NPSN','Nama','Total','L','P','Bentuk'])
++    for i in range(a.rows):s.append([str(10000000+i),'SYNTHETIC SCHOOL '+str(i),100,50,50,'SMP' if i%2 else 'SMA'])
+     x=root/'fixture.xlsx';w.save(x);w.close();c.initialize(root/'test.sqlite');db=c.connect(root/'test.sqlite')
+     start=time.monotonic()
+-    imp=c.import_xlsx(db,x,'Synthetic',{'npsn':'NPSN','name':'Nama','students_total':'Total','students_male':'L','students_female':'P'},2026)
++    imp=c.import_xlsx(db,x,'Synthetic',{'npsn':'NPSN','name':'Nama','students_total':'Total','students_male':'L','students_female':'P','school_form':'Bentuk'},2026)
+     import_seconds=time.monotonic()-start;start=time.monotonic()
+     while c.run_jobs(db,100)['results']:pass
+     duration=time.monotonic()-start
+--- a/collector/tests/test_collector.py
++++ b/collector/tests/test_collector.py
+@@ -32,7 +32,7 @@
+         return c.import_xlsx(self.db,path,'Data',self.mapping,2026,**kwargs)
+     def draft(self):
+         self.imp([['20515441','SMKN 1 BANDUNG','KAB. TULUNGAGUNG',10,4,6]])
+-        out=c.run_jobs(self.db);return out['results'][0]['draft_id']
++        out=c.run_jobs(self.db,include_other=True);return out['results'][0]['draft_id']
+     def test_no_accidental_database_creation_or_overwrite(self):
+         with self.assertRaises(sqlite3.OperationalError):c.connect(self.root/'missing.sqlite')
+         with self.assertRaises(FileExistsError):c.initialize(self.root/'db.sqlite')
+@@ -43,12 +43,12 @@
+         p=self.book(rows)
+         first=c.import_xlsx(self.db,p,'Data',self.mapping,2026,max_rows=3)
+         self.assertEqual(first['status'],'paused')
+-        blocked=c.run_jobs(self.db)['results'][0];self.assertEqual(blocked['error'],'IMPORT_NOT_COMPLETE')
++        blocked=c.run_jobs(self.db,include_other=True)['results'][0];self.assertEqual(blocked['error'],'IMPORT_NOT_COMPLETE')
+         final=c.import_xlsx(self.db,p,'Data',self.mapping,2026)
+         self.assertEqual(final['rows_processed'],7)
+         self.assertEqual(c.import_xlsx(self.db,p,'Data',self.mapping,2026)['rows_processed'],0)
+         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM observations').fetchone()[0],10)
+-        c.run_jobs(self.db,10)
++        c.run_jobs(self.db,10,include_other=True)
+         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM drafts').fetchone()[0],10)
+     def test_identity_conflict_and_same_name_distinct_npsn(self):
+         self.imp([['10000001','Nama sama','A',1,1,0],['10000002','Nama sama','A',1,1,0],['10000001','Nama berbeda','B',1,1,0]])
+@@ -86,15 +86,15 @@
+         self.assertIn('DROP TABLE',c.template(c.evidence_snapshot(self.db,'10000001'))['article_text'])
+     def test_pause_resume_and_expired_lease_fence(self):
+         self.imp([['10000001','Sekolah','A',1,1,0]])
+-        c.control(self.db,'pause');self.assertEqual(c.run_jobs(self.db)['results'],[])
++        c.control(self.db,'pause');self.assertEqual(c.run_jobs(self.db,include_other=True)['results'],[])
+         c.control(self.db,'resume')
+-        with patch.object(c.time,'time',side_effect=[100,161]):out=c.run_jobs(self.db,1)
++        with patch.object(c.time,'time',side_effect=[100,161]):out=c.run_jobs(self.db,1,include_other=True)
+         self.assertEqual(out['results'][0]['error'],'LEASE_LOST')
+         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM drafts').fetchone()[0],0)
+-        c.run_jobs(self.db,1);self.assertEqual(self.db.execute('SELECT COUNT(*) FROM drafts').fetchone()[0],1)
++        c.run_jobs(self.db,1,include_other=True);self.assertEqual(self.db.execute('SELECT COUNT(*) FROM drafts').fetchone()[0],1)
+     def test_explicit_recovery_and_retry_bound(self):
+         self.imp([['10000001','A','A',1,1,0],['10000001','B','A',1,1,0]])
+-        for _ in range(5):c.run_jobs(self.db,1)
++        for _ in range(5):c.run_jobs(self.db,1,include_other=True)
+         self.assertEqual(dict(self.db.execute('SELECT status,attempts FROM jobs').fetchone()),{'status':'failed','attempts':3})
+         c.control(self.db,'retry-failed');self.assertEqual(self.db.execute('SELECT attempts FROM jobs').fetchone()[0],0)
+         with self.db:self.db.execute("UPDATE jobs SET status='leased',token='x',leased_until=0")
+@@ -103,19 +103,19 @@
+         draft=self.draft();payload=self.db.execute('SELECT payload FROM drafts').fetchone()[0]
+         with self.db:self.db.execute("UPDATE jobs SET status='queued'")
+         # Existing immutable cache is replayed, never overwritten.
+-        c.run_jobs(self.db,1)
++        c.run_jobs(self.db,1,include_other=True)
+         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM drafts').fetchone()[0],1)
+         self.assertEqual(self.db.execute('SELECT payload FROM drafts').fetchone()[0],payload)
+     def test_sql_fault_rolls_back_draft_and_checkpoint(self):
+         self.imp([['10000001','A','A',1,1,0]])
+         with self.db:self.db.execute("CREATE TRIGGER fail_draft BEFORE INSERT ON drafts BEGIN SELECT RAISE(ABORT,'synthetic fault'); END")
+-        result=c.run_jobs(self.db,1)
++        result=c.run_jobs(self.db,1,include_other=True)
+         self.assertEqual(result['results'][0]['error'],'INTERNAL_ERROR')
+         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM drafts').fetchone()[0],0)
+         self.assertEqual(self.db.execute('SELECT status FROM jobs').fetchone()[0],'retry_wait')
+         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM audit WHERE event='draft_saved'").fetchone()[0],0)
+         with self.db:self.db.execute('DROP TRIGGER fail_draft')
+-        c.run_jobs(self.db,1)
++        c.run_jobs(self.db,1,include_other=True)
+         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM drafts').fetchone()[0],1)
+     def test_stale_worker_cannot_complete_replaced_lease(self):
+         self.imp([['10000001','A','A',1,1,0]])
+@@ -123,7 +123,7 @@
+         def replace(snapshot):
+             with self.db:self.db.execute("UPDATE jobs SET token='new-owner' WHERE npsn='10000001'")
+             return original(snapshot)
+-        with patch.object(c,'template',side_effect=replace):result=c.run_jobs(self.db,1)
++        with patch.object(c,'template',side_effect=replace):result=c.run_jobs(self.db,1,include_other=True)
+         self.assertEqual(result['results'][0]['error'],'LEASE_LOST')
+         self.assertEqual(self.db.execute('SELECT token FROM jobs').fetchone()[0],'new-owner')
+         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM drafts').fetchone()[0],0)
+@@ -133,7 +133,7 @@
+         def change(snapshot):
+             with self.db:self.db.execute("UPDATE schools SET identity_json=? WHERE npsn='10000001'",(c.canonical({'name':'B','regency':'A'}),))
+             return original(snapshot)
+-        with patch.object(c,'template',side_effect=change):result=c.run_jobs(self.db,1)
++        with patch.object(c,'template',side_effect=change):result=c.run_jobs(self.db,1,include_other=True)
+         self.assertEqual(result['results'][0]['error'],'INPUT_CHANGED_RETRY')
+         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM drafts').fetchone()[0],0)
+     def test_export_stale_rejected_and_existing_file_preserved(self):
+--- a/collector/tests/test_priority.py
++++ b/collector/tests/test_priority.py
+@@ -0,0 +1,95 @@
++import json
++from pathlib import Path
++import sqlite3
++from unittest.mock import patch
++import test_collector as base
++c=base.c
++
++# Own fixture setup, without inheriting/re-running the entire original suite.
++import unittest
++class PriorityTests(unittest.TestCase):
++    setUp=base.CollectorTests.setUp
++    tearDown=base.CollectorTests.tearDown
++    book=base.CollectorTests.book
++    def load(self, rows):
++        p=self.book(rows,headers=['NPSN','Nama','Bentuk'])
++        return c.import_xlsx(self.db,p,'Data',{'npsn':'NPSN','name':'Nama','school_form':'Bentuk'},2026)
++    def old_schema(self):
++        with self.db:
++            self.db.execute('DROP INDEX jobs_ready_priority')
++            self.db.execute('ALTER TABLE jobs RENAME TO jobs_v2')
++            self.db.execute("CREATE TABLE jobs(npsn TEXT PRIMARY KEY REFERENCES schools(npsn),status TEXT NOT NULL DEFAULT 'queued',attempts INTEGER NOT NULL DEFAULT 0,token TEXT,leased_until INTEGER,error TEXT)")
++            self.db.execute('INSERT INTO jobs SELECT npsn,status,attempts,token,leased_until,error FROM jobs_v2')
++            self.db.execute('DROP TABLE jobs_v2');self.db.execute('PRAGMA user_version=1')
++        self.db.close()
++    def test_all_lower_secondary_first_even_when_npsn_larger(self):
++        self.load([['10000001','SMA','SMA'],['10000002','MA','MA'],['10000009','MTs','MTs'],['10000008','SMP','SMP'],['10000003','SMK','SMK']])
++        out=c.run_jobs(self.db,10)['results']
++        self.assertEqual([x['npsn'] for x in out],['10000008','10000009','10000001','10000002','10000003'])
++    def test_unknown_other_and_missing_excluded_by_default(self):
++        self.load([['10000001','SMP in name only','SD'],['10000002','MTs in name only',None],['10000003','Multi-level','SLB']])
++        self.assertEqual(c.run_jobs(self.db,10)['results'],[])
++        self.assertEqual(len(c.run_jobs(self.db,10,include_other=True)['results']),3)
++    def test_explicit_equivalents_and_case_normalization(self):
++        for form in ['SMP',' mtS ','MTsN','SMPLB','SMPK','SMPTK','Paket B']:
++            self.assertEqual(c.school_priority({'school_form':form}),0)
++        for form in ['SMA','SMK','MA','MAN','MAK','SMALB','SMAK','SMTK','Paket C']:
++            self.assertEqual(c.school_priority({'school_form':form}),1)
++        for form in ['SLB','SD','TK','SMK-UNKNOWN',None]:
++            self.assertEqual(c.school_priority({'name':'SMP','school_form':form}),2)
++    def test_ready_queue_uses_partial_index(self):
++        plan=self.db.execute("EXPLAIN QUERY PLAN SELECT * FROM jobs WHERE status IN ('queued','retry_wait') AND attempts<3 AND priority<=1 ORDER BY priority,npsn LIMIT 1").fetchall()
++        text=' '.join(str(tuple(r)) for r in plan)
++        self.assertIn('jobs_ready_priority',text);self.assertNotIn('TEMP B-TREE',text)
++    def test_v1_explicit_upgrade_backup_and_cache_preserved(self):
++        self.load([['10000001','SMP','SMP'],['10000002','SMA','SMA']]);c.run_jobs(self.db,1)
++        before=self.db.execute('SELECT payload FROM drafts').fetchone()[0]
++        self.old_schema()
++        with self.assertRaises(ValueError):c.connect(self.root/'db.sqlite')
++        out=c.upgrade(self.root/'db.sqlite');self.assertTrue(out['upgraded'])
++        backup=sqlite3.connect(out['backup']);self.assertEqual(backup.execute('PRAGMA user_version').fetchone()[0],1);backup.close()
++        self.db=c.connect(self.root/'db.sqlite')
++        self.assertEqual(self.db.execute('SELECT payload FROM drafts').fetchone()[0],before)
++        self.assertEqual([r[0] for r in self.db.execute('SELECT priority FROM jobs ORDER BY npsn')],[0,1])
++        self.assertFalse(c.upgrade(self.root/'db.sqlite')['upgraded'])
++    def test_upgrade_rejects_active_lease(self):
++        self.load([['10000001','SMP','SMP']])
++        with self.db:self.db.execute("UPDATE jobs SET status='leased',token='x',leased_until=9999999999")
++        self.old_schema()
++        with self.assertRaisesRegex(ValueError,'STOP_AND_RECOVER'):c.upgrade(self.root/'db.sqlite')
++        self.assertFalse(Path(str(self.root/'db.sqlite')+'.before-priority-v2.sqlite').exists())
++    def test_upgrade_failure_rolls_back_schema(self):
++        self.load([['10000001','SMP','SMP']]);self.old_schema()
++        with patch.object(c,'audit',side_effect=RuntimeError('synthetic failure')):
++            with self.assertRaises(RuntimeError):c.upgrade(self.root/'db.sqlite')
++        old=sqlite3.connect(self.root/'db.sqlite')
++        self.assertEqual(old.execute('PRAGMA user_version').fetchone()[0],1)
++        self.assertNotIn('priority',[r[1] for r in old.execute('PRAGMA table_info(jobs)')]);old.close()
++    def test_inspect_only_returns_headers_not_private_rows(self):
++        p=self.book([['10000001','PRIVATE ROW','SMP']],headers=['NPSN','Nama','Bentuk'])
++        out=c.inspect_xlsx(p)
++        self.assertNotIn('PRIVATE ROW',json.dumps(out))
++        self.assertEqual(out['sheets'][0]['headers'],['NPSN','Nama','Bentuk'])
++        self.assertEqual(out['data_rows_read'],0)
++        self.assertEqual(c.main(['--db','unused','inspect-xlsx','--file',str(p)])['file_sha256'],out['file_sha256'])
++
++    def shared_book(self, xml):
++        import zipfile,re
++        p=self.book([['10000001','PRIVATE ROW','SMP']],headers=['NPSN','Nama','Bentuk'])
++        with zipfile.ZipFile(p) as z:entries={name:z.read(name) for name in z.namelist()}
++        sheet=entries['xl/worksheets/sheet1.xml'].decode()
++        sheet=re.sub(r'<row r="1">.*?</row>', '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c></row>',sheet)
++        entries['xl/worksheets/sheet1.xml']=sheet.encode();entries['xl/sharedStrings.xml']=xml
++        with zipfile.ZipFile(p,'w') as z:
++            for name,data in entries.items():z.writestr(name,data)
++        return p
++    def test_header_shared_strings_rich_text(self):
++        xml=b'<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>NPSN</t></si><si><r><t>Na</t></r><r><t>ma</t></r></si><si><t>Bentuk</t></si><si><t>PRIVATE STRING NOT NEEDED</t></si></sst>'
++        p=self.shared_book(xml);out=c.inspect_xlsx(p)
++        self.assertEqual(out['sheets'][0]['headers'],['NPSN','Nama','Bentuk'])
++        self.assertNotIn('PRIVATE STRING',json.dumps(out))
++    def test_header_shared_string_entity_rejected(self):
++        from defusedxml.common import DefusedXmlException
++        xml=b'<!DOCTYPE sst [<!ENTITY x SYSTEM "file:///not-permitted">]><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>&x;</t></si></sst>'
++        p=self.shared_book(xml)
++        with self.assertRaises(DefusedXmlException):c.inspect_xlsx(p)

@@ -1,4 +1,4 @@
-# AHDA Collector offline — pratinjau pengembangan 2026.1
+# AHDA Collector offline — pratinjau pengembangan 2026.2
 
 Collector ini menambahkan pengolahan Excel dan draf ke proyek AHDA yang ada.
 Plugin Directory 0.8.9 dan Discovery 7.18 tidak diubah. Collector tidak membuat
@@ -13,6 +13,36 @@ ekspor draf, serta preview baca-saja di LocalWP.
 penerbitan `profile_description`, artikel lengkap, serta uji nyata 10 profil LocalWP.
 Excel gabungan nasional 2026 belum tersedia untuk diuji. Memasang ZIP Discovery
 saja tidak menjalankan Collector atau mengubah halaman sekolah.
+
+## Prioritas jenjang — versi 2026.2
+
+Antrean sekarang memproses **SMP/MTs dahulu**, kemudian **SMA/SMK/MA**.
+Dalam setiap kelompok, urutan NPSN tetap deterministik. Klasifikasi memakai
+`school_form` yang dipetakan dari kolom bentuk pendidikan, bukan nama sekolah.
+Contoh mapping siswa kini menyertakan `school_form: Bentuk Pendidikan`; sesuaikan
+header itu dengan Excel aktual. Tanpa kolom tersebut, jenjang dianggap belum diketahui.
+
+Padanan yang didukung secara eksplisit: SMPLB/SMPK/SMPTK/Paket B pada kelompok
+pertama; SMALB/SMAK/SMTK/MAK/Paket C/Utama Widya Pasraman pada kelompok kedua.
+MTsN/MTsS dan MAN/MAS dikenali sebagai label bentuk, bukan penetapan status negeri.
+SLB yang tidak menyebut jenjang, bentuk asing, SD/TK, serta nilai kosong tidak
+masuk run default. `run --include-other` hanya untuk keputusan operator yang sengaja
+ingin memproses kelompok lain setelah dua kelompok prioritas.
+
+Database baru memakai schema SQLite2. Jika sudah membuat database dengan Collector
+2026.1, hentikan semua worker dan selesaikan/recover lease memakai source lama dahulu.
+Simpan backup source, lalu jalankan dengan source baru:
+
+```bat
+.venv\Scripts\python.exe ahda_collector.py --db ahda2026.sqlite upgrade
+```
+
+Upgrade membuat `ahda2026.sqlite.before-priority-v2.sqlite`, mempertahankan sekolah,
+fakta, draf dan status, lalu menambah prioritas dan indeks antrean. Lease aktif dan
+backup dengan nama sama ditolak. Tidak ada migrasi diam-diam saat connect.
+Jika upgrade gagal, simpan backup untuk pemeriksaan, jangan menghapusnya agar bisa
+memaksa retry. Rollback ke source2026.1 memerlukan backup database schema1 ketika
+semua proses berhenti; source lama tidak boleh dipakai pada schema2.
 
 ## Instalasi Windows
 
@@ -37,8 +67,28 @@ melanjutkan pekerjaan. Backup SQLite ketika worker berhenti.
 
 ## Menyiapkan Excel dan mapping
 
-File gabungan sekolah dan agregat peserta didik 2026 yang dimaksud operator belum
-tersedia di workspace ini. Header harus diperiksa pada file aktual. Collector
+Unggahan `AHDA_Gabungan_Sekolah_Peserta_Didik_2026.xlsx` melebihi batas transfer
+alat cloud 32 MiB; belum dibaca atau dihitung. File aslinya dapat diperiksa di Windows
+menggunakan source ini. Salin file ke path contoh atau sesuaikan parameter:
+
+```bat
+.venv\Scripts\python.exe -X utf8 ahda_collector.py --db unused inspect-xlsx --file "C:\AHDA\AHDA_Gabungan_Sekolah_Peserta_Didik_2026.xlsx" > header-2026.json
+```
+
+Perintah tidak membuat database. Ia membaca baris pertama setiap worksheet sebagai
+calon header; bukan baris data, dan tidak menyimpulkan jumlah sekolah dari dimensi.
+Periksa `header-2026.json` sebelum membagikannya: jika baris pertama ternyata data
+pribadi, jangan kirim. Shared strings dipindai streaming hanya untuk indeks header,
+dengan batas scan 64 MiB, header worksheet 16 MiB, dan maksimal 100 sheet. Jika batas
+tercapai, pisahkan workbook; jangan menurunkan pengamanan XML.
+
+Untuk pengujian cloud pada data aktual, simpan salinan terfilter **SMP/MTs dahulu**
+dengan header utuh dan ukuran tiap file di bawah 32 MiB. Jangan unggah data pribadi
+siswa. File sumber asli tetap dipertahankan. Pemeriksaan header ringan ini tidak
+mengubah batas memori importer penuh di bawah.
+
+Isi file gabungan sekolah dan agregat peserta didik 2026 belum dapat ditransfer
+ke workspace karena batas ukuran alat. Header harus diperiksa pada file aktual. Collector
 memerlukan header pada baris pertama, sheet yang dipilih secara eksplisit, dan
 mapping JSON. Tidak ada pencocokan sekolah berdasarkan nama.
 
@@ -169,7 +219,7 @@ tes tersebut ditandai skipped. Uji SQLite sintetis 10/100/1.000 bukan uji profil
 LocalWP. Pengukuran Linux untuk 1.000 baris sekitar 38 MiB peak RSS; jangan
 mengekstrapolasikannya menjadi jaminan Windows atau 555.000 sekolah.
 
-Bukti: `docs/qa/collector-2026` pada branch. Audit: `docs/COLLECTOR_AUDIT_2026.md`.
+Bukti awal: `docs/qa/collector-2026`; bukti prioritas terbaru: `docs/qa/collector-priority-2026` pada branch. Audit: `docs/COLLECTOR_AUDIT_2026.md`.
 Checkpoint: `docs/PROGRESS.md`. Rollback dengan menghentikan Collector lalu memakai
 source dan backup SQLite sebelumnya. Tidak ada perubahan profil WordPress untuk
 di-undo oleh Collector ini. Ranking Google atau rekomendasi AI tidak dijanjikan.

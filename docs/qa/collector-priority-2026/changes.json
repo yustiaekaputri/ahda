@@ -1,0 +1,32 @@
+[
+  {
+    "file": "collector/README.md",
+    "old_sha256": "e9bf652d5e4ff33ecea1dbc81cde3cad0613b4e33722da6b0d03a6c3cdc1770e",
+    "new_sha256": "16b398a35a06408bfa5fa12477ebf83531ce249109d4b663b7dcce53932ec881"
+  },
+  {
+    "file": "collector/ahda_collector.py",
+    "old_sha256": "c5f0aba62a2cc0b88591528d6482682c7d7e7d085459dae4c85109f2260f7906",
+    "new_sha256": "0c4e149e53fe47dc9d9dc3428aefcda0b9e7bb6399ffd012d3b589c0da22efad"
+  },
+  {
+    "file": "collector/examples/mapping-with-students.json",
+    "old_sha256": "cf5cb05ba2c0ace7220fc6d84c94ebe19a358f751d9d812d5dd6b73faaa238df",
+    "new_sha256": "05942312d3218700f217c10b85d8a452f5375099912cab65887ac58a0debed42"
+  },
+  {
+    "file": "collector/tests/benchmark.py",
+    "old_sha256": "85bea50ad6fe9797f92995d6a9fbcd54b80ea5913a830a83775b26337e8ef57b",
+    "new_sha256": "23e93f10fe83315ac5112f8e35fa95a632ba19d6f0fca6f3646c6cc791faa6cd"
+  },
+  {
+    "file": "collector/tests/test_collector.py",
+    "old_sha256": "468cf17dc1cae03e2d427bdf93da0248dc417612becfa271fb43024126e4cd9b",
+    "new_sha256": "c794981424d543923b6295817d73f6b921526cfe7f137ca5ef27d7c05387b477"
+  },
+  {
+    "file": "collector/tests/test_priority.py",
+    "old_sha256": null,
+    "new_sha256": "ab3de804e3ea80664829fd7a3bfc11c2cd3bf886d3086000f739be459ad49393"
+  }
+]

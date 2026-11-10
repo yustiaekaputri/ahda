@@ -1,4 +1,7 @@
-# Audit AHDA dan Collector 2026 — 2026-11-10
+# Audit awal AHDA dan Collector 2026.1 — 2026-11-10
+
+Perubahan berikutnya, termasuk schema SQLite2 dan file nasional yang telah diunggah
+namun belum dapat ditransfer, dicatat di COLLECTOR_PRIORITY_2026.md.
 
 ## Source yang benar-benar tersedia
 

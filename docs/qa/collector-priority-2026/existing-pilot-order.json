@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "source": "Existing200Tasikmalaya workbook ONLY; newly uploaded national workbook was NOT transferred/read",
+  "school_priority_counts": {
+    "0": 177,
+    "1": 23
+  },
+  "all177lower_secondary_precede23upper_secondary": true,
+  "drafts": 200,
+  "wordpress_writes": 0,
+  "source_workbook_unchanged": true,
+  "temporary_db_removed": true
+}

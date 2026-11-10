@@ -1,0 +1,12 @@
+{
+  "collector/wordpress-preview.php": "36fd45383090091490cd6b9654f4cc630a16335222815102d0e62e8ce53a2b61",
+  "collector/requirements.txt": "cbcff131cb708fc43320f1b549cf39959324970f62a9a7297853250268a69cba",
+  "collector/ahda_collector.py": "0c4e149e53fe47dc9d9dc3428aefcda0b9e7bb6399ffd012d3b589c0da22efad",
+  "collector/README.md": "16b398a35a06408bfa5fa12477ebf83531ce249109d4b663b7dcce53932ec881",
+  "collector/examples/mapping.json": "75c8c5b353fbc0a7485f2f3758558cac5e62f05e9642c4aea1e0797071bc6d31",
+  "collector/examples/mapping-with-students.json": "05942312d3218700f217c10b85d8a452f5375099912cab65887ac58a0debed42",
+  "collector/tests/test_wordpress_preview.py": "41d02e35bf116ff97d161179d78b3ee7266569f4feb714988b9d33c667630704",
+  "collector/tests/test_collector.py": "c794981424d543923b6295817d73f6b921526cfe7f137ca5ef27d7c05387b477",
+  "collector/tests/test_priority.py": "ab3de804e3ea80664829fd7a3bfc11c2cd3bf886d3086000f739be459ad49393",
+  "collector/tests/benchmark.py": "23e93f10fe83315ac5112f8e35fa95a632ba19d6f0fca6f3646c6cc791faa6cd"
+}

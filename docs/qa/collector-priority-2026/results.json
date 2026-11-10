@@ -1,0 +1,18 @@
+{
+  "status": "PASS_CODE_ONLY_NATIONAL_FILE_TRANSFER_BLOCKED",
+  "unique_tests": 38,
+  "new_priority_migration_header_tests": 10,
+  "previous_python_tests": 22,
+  "unchanged_php_facade_tests": 6,
+  "schema_version": 2,
+  "baseline_hashes_match": 84,
+  "wordpress_helper_unchanged": true,
+  "synthetic_scale": 1000,
+  "national_workbook": "NOT_READ_TRANSFER_EXCEEDS_32MiB",
+  "national_source_sha256": null,
+  "actual_national_excel_imports": 0,
+  "wordpress_writes": 0,
+  "network_requests": 0,
+  "initial_test_discovery": "58PASS contained22 duplicate rediscoveries; final38unique after import cleanup",
+  "real_windows_4gb_tests": 0
+}

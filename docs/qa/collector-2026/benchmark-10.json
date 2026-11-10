@@ -1,0 +1,1 @@
+{"status": "PASS", "synthetic_rows": 10, "unique_schools": 10, "drafts": 10, "import_seconds": 0.027, "generation_seconds": 0.039, "process_peak_rss_bytes": 36364288, "measurement_platform": "Linux", "sqlite_bytes": 102400, "network_requests": 0, "wordpress_writes": 0, "scope": "Local synthetic SQLite, not Windows4GB/LocalWP/national555k benchmark"}

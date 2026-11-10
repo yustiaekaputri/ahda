@@ -1,0 +1,12 @@
+{
+  "status": "PASS",
+  "source": "Existing operator-provided Tasikmalaya pilot workbook, NOT combined national school/student2026 dataset",
+  "file_sha256": "c3a54e0c7de2e3ec76475cf7da93764f73335f4796856a7acaed4d3dc2ddc3d1",
+  "schools": 200,
+  "drafts_generated": 10,
+  "student_count_claims": 0,
+  "wordpress_writes": 0,
+  "network_requests": 0,
+  "source_workbook_unchanged": true,
+  "temporary_database_removed_on_exit": true
+}

@@ -1,0 +1,81 @@
+test_bad_mapping_and_duplicate_header (test_collector.CollectorTests.test_bad_mapping_and_duplicate_header) ... ok
+test_conflicting_counts_withheld_across_files (test_collector.CollectorTests.test_conflicting_counts_withheld_across_files) ... ok
+test_duplicate_preserves_provenance_not_school_duplication (test_collector.CollectorTests.test_duplicate_preserves_provenance_not_school_duplication) ... ok
+test_explicit_recovery_and_retry_bound (test_collector.CollectorTests.test_explicit_recovery_and_retry_bound) ... ok
+test_export_stale_rejected_and_existing_file_preserved (test_collector.CollectorTests.test_export_stale_rejected_and_existing_file_preserved) ... ok
+test_formula_and_bad_npsn_quarantined (test_collector.CollectorTests.test_formula_and_bad_npsn_quarantined) ... ok
+test_identity_conflict_and_same_name_distinct_npsn (test_collector.CollectorTests.test_identity_conflict_and_same_name_distinct_npsn) ... ok
+test_immutable_cache_replay (test_collector.CollectorTests.test_immutable_cache_replay) ... ok
+test_input_change_before_commit_rejected (test_collector.CollectorTests.test_input_change_before_commit_rejected) ... ok
+test_invalid_counts_and_sum_not_published (test_collector.CollectorTests.test_invalid_counts_and_sum_not_published) ... ok
+test_issue_pagination_cli_and_report (test_collector.CollectorTests.test_issue_pagination_cli_and_report) ... ok
+test_no_accidental_database_creation_or_overwrite (test_collector.CollectorTests.test_no_accidental_database_creation_or_overwrite) ... ok
+test_no_student_personal_columns_retained (test_collector.CollectorTests.test_no_student_personal_columns_retained) ... ok
+test_ollama_is_optional_and_cannot_replace_facts (test_collector.CollectorTests.test_ollama_is_optional_and_cannot_replace_facts) ... ok
+test_pause_resume_and_expired_lease_fence (test_collector.CollectorTests.test_pause_resume_and_expired_lease_fence) ... ok
+test_plain_text_sql_injection_and_xss (test_collector.CollectorTests.test_plain_text_sql_injection_and_xss) ... ok
+test_resume_and_exact_replay (test_collector.CollectorTests.test_resume_and_exact_replay) ... ok
+test_source_changed_during_import_quarantined (test_collector.CollectorTests.test_source_changed_during_import_quarantined) ... ok
+test_source_reference_never_fetches (test_collector.CollectorTests.test_source_reference_never_fetches) ... ok
+test_sql_fault_rolls_back_draft_and_checkpoint (test_collector.CollectorTests.test_sql_fault_rolls_back_draft_and_checkpoint) ... ok
+test_stale_worker_cannot_complete_replaced_lease (test_collector.CollectorTests.test_stale_worker_cannot_complete_replaced_lease) ... ok
+test_xml_entities_are_blocked (test_collector.CollectorTests.test_xml_entities_are_blocked) ... ERROR
+test_duplicate_existing_npsn_rejected (test_wordpress_preview.PreviewTests.test_duplicate_existing_npsn_rejected) ... ok
+test_empty_existing_profile_is_review_only (test_wordpress_preview.PreviewTests.test_empty_existing_profile_is_review_only) ... ok
+test_existing_description_preserved (test_wordpress_preview.PreviewTests.test_existing_description_preserved) ... ok
+test_identity_name_difference_blocks_without_name_join (test_wordpress_preview.PreviewTests.test_identity_name_difference_blocks_without_name_join) ... ok
+test_npsn_sql_injection_rejected (test_wordpress_preview.PreviewTests.test_npsn_sql_injection_rejected) ... ok
+test_production_is_rejected_before_queries (test_wordpress_preview.PreviewTests.test_production_is_rejected_before_queries) ... ok
+
+======================================================================
+ERROR: test_xml_entities_are_blocked (test_collector.CollectorTests.test_xml_entities_are_blocked)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/openpyxl/reader/excel.py", line 303, in read
+    self.read_worksheets()
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/openpyxl/reader/excel.py", line 228, in read_worksheets
+    ws = ReadOnlyWorksheet(self.wb, sheet.name, rel.target, self.shared_strings)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/openpyxl/worksheet/_read_only.py", line 42, in __init__
+    self._get_size()
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/openpyxl/worksheet/_read_only.py", line 49, in _get_size
+    dimensions = parser.parse_dimensions()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/openpyxl/worksheet/_reader.py", line 178, in parse_dimensions
+    for _event, element in it:
+                           ^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/xml/etree/ElementTree.py", line 1241, in iterator
+    pullparser.feed(data)
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/xml/etree/ElementTree.py", line 1284, in feed
+    self._parser.feed(data)
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/xml/etree/ElementTree.py", line 1706, in feed
+    self.parser.Parse(data, False)
+  File "./Modules/pyexpat.c", line 567, in EntityDecl
+  File "/workspace/ahda-tools/collector-venv/lib/python3.12/site-packages/defusedxml/ElementTree.py", line 124, in defused_entity_decl
+    raise EntitiesForbidden(name, value, base, sysid, pubid, notation_name)
+defusedxml.common.EntitiesForbidden: EntitiesForbidden(name='ext', system_id='file:///should-never-read', public_id=None)
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/workspace/ahda/collector/tests/test_collector.py", line 166, in test_xml_entities_are_blocked
+    with self.assertRaises(DefusedXmlException):c.import_xlsx(self.db,p,'Data',self.mapping,2026)
+                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ahda/collector/ahda_collector.py", line 175, in import_xlsx
+    with contextlib.closing(workbook(path)) as book:
+                            ^^^^^^^^^^^^^^
+  File "/workspace/ahda/collector/ahda_collector.py", line 162, in workbook
+    return openpyxl.load_workbook(path, read_only=True, data_only=False, keep_links=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/openpyxl/reader/excel.py", line 348, in load_workbook
+    reader.read()
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/openpyxl/reader/excel.py", line 309, in read
+    raise ValueError(
+ValueError: Unable to read workbook: could not read worksheets from /tmp/tmpfjr7iwx5/test.xlsx.
+This is most probably because the workbook source files contain some invalid XML.
+Please see the exception for more details.
+
+----------------------------------------------------------------------
+Ran 28 tests in 0.809s
+
+FAILED (errors=1)

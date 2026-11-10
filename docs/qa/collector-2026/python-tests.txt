@@ -1,0 +1,33 @@
+test_bad_mapping_and_duplicate_header (test_collector.CollectorTests.test_bad_mapping_and_duplicate_header) ... ok
+test_conflicting_counts_withheld_across_files (test_collector.CollectorTests.test_conflicting_counts_withheld_across_files) ... ok
+test_duplicate_preserves_provenance_not_school_duplication (test_collector.CollectorTests.test_duplicate_preserves_provenance_not_school_duplication) ... ok
+test_explicit_recovery_and_retry_bound (test_collector.CollectorTests.test_explicit_recovery_and_retry_bound) ... ok
+test_export_stale_rejected_and_existing_file_preserved (test_collector.CollectorTests.test_export_stale_rejected_and_existing_file_preserved) ... ok
+test_formula_and_bad_npsn_quarantined (test_collector.CollectorTests.test_formula_and_bad_npsn_quarantined) ... ok
+test_identity_conflict_and_same_name_distinct_npsn (test_collector.CollectorTests.test_identity_conflict_and_same_name_distinct_npsn) ... ok
+test_immutable_cache_replay (test_collector.CollectorTests.test_immutable_cache_replay) ... ok
+test_input_change_before_commit_rejected (test_collector.CollectorTests.test_input_change_before_commit_rejected) ... ok
+test_invalid_counts_and_sum_not_published (test_collector.CollectorTests.test_invalid_counts_and_sum_not_published) ... ok
+test_issue_pagination_cli_and_report (test_collector.CollectorTests.test_issue_pagination_cli_and_report) ... ok
+test_no_accidental_database_creation_or_overwrite (test_collector.CollectorTests.test_no_accidental_database_creation_or_overwrite) ... ok
+test_no_student_personal_columns_retained (test_collector.CollectorTests.test_no_student_personal_columns_retained) ... ok
+test_ollama_is_optional_and_cannot_replace_facts (test_collector.CollectorTests.test_ollama_is_optional_and_cannot_replace_facts) ... ok
+test_pause_resume_and_expired_lease_fence (test_collector.CollectorTests.test_pause_resume_and_expired_lease_fence) ... ok
+test_plain_text_sql_injection_and_xss (test_collector.CollectorTests.test_plain_text_sql_injection_and_xss) ... ok
+test_resume_and_exact_replay (test_collector.CollectorTests.test_resume_and_exact_replay) ... ok
+test_source_changed_during_import_quarantined (test_collector.CollectorTests.test_source_changed_during_import_quarantined) ... ok
+test_source_reference_never_fetches (test_collector.CollectorTests.test_source_reference_never_fetches) ... ok
+test_sql_fault_rolls_back_draft_and_checkpoint (test_collector.CollectorTests.test_sql_fault_rolls_back_draft_and_checkpoint) ... ok
+test_stale_worker_cannot_complete_replaced_lease (test_collector.CollectorTests.test_stale_worker_cannot_complete_replaced_lease) ... ok
+test_xml_entities_are_blocked (test_collector.CollectorTests.test_xml_entities_are_blocked) ... ok
+test_duplicate_existing_npsn_rejected (test_wordpress_preview.PreviewTests.test_duplicate_existing_npsn_rejected) ... ok
+test_empty_existing_profile_is_review_only (test_wordpress_preview.PreviewTests.test_empty_existing_profile_is_review_only) ... ok
+test_existing_description_preserved (test_wordpress_preview.PreviewTests.test_existing_description_preserved) ... ok
+test_identity_name_difference_blocks_without_name_join (test_wordpress_preview.PreviewTests.test_identity_name_difference_blocks_without_name_join) ... ok
+test_npsn_sql_injection_rejected (test_wordpress_preview.PreviewTests.test_npsn_sql_injection_rejected) ... ok
+test_production_is_rejected_before_queries (test_wordpress_preview.PreviewTests.test_production_is_rejected_before_queries) ... ok
+
+----------------------------------------------------------------------
+Ran 28 tests in 1.462s
+
+OK

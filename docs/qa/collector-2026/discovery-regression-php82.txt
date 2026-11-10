@@ -1,0 +1,28 @@
+PASS: 27 M1 bootstrap compatibility checks (offline, no WP/DB).
+PASS: 25 M1 fake transport checks (no DNS, sockets, or DB).
+PASS: 79 frozen Tasikmalaya scope checks (selected identifiers, fake DB and synthetic IDs; NOT LocalWP).
+PASS: 30 M1 CLI scope/permission/dry-run checks (fake DB).
+PASS: 96 M1 pilot/queue simulation checks (fake DB; no real writes/network).
+PASS: 84 M1 policy checks (offline, no network).
+PASS: 30 read-only source inventory checks (fake legacy/Discovery DB; no HTTP).
+PASS: 26 archive batch input/identity/consent checks (fake DB; frozen200 shape, no raw fetch/writes or school facts).
+PASS: 77 raw-receipt candidate bridge/security/atomicity checks (fake DB, synthetic only; no actual writes/network).
+PASS: 131 archive review/current-value/multisource editorial checks (fake DB, no HTTP or writes).
+PASS: 37 raw archive vault/consent/idempotence/rollback checks (fake DB; synthetic inputs, no actual writes/network).
+PASS: 72 M2 article draft/quality/security checks (offline, fake DB, no publication).
+PASS: 116 M2 local document parser checks (actual DOM + strict CSV, fake DB; no HTTP/writes).
+PASS: 60 M2 structured evidence/candidate preview checks (pure/fake DB; fixture facts only).
+PASS: 95 local archive/resume/conflict/security checks (pure synthetic; no DB/HTTP; HTML actual DOM).
+PASS: 115 M2 pending-store transactional simulations (fake DB only; NO LocalWP/MySQL writes).
+PASS: 34 bounded metadata-only inventory checks (fake DB; no raw/document/network/write).
+PASS: 111 M3 negative-review atomicity/nonce/permission checks (fake WP/DB; default OFF).
+PASS: 70 M3 read-only inspector/security/UI checks (WP/fake DB stubs; no mutation).
+PASS: 38 explicit raw-binding verification/security checks (fake DB, synthetic; no actual writes/network).
+PASS: 42 operator attestation/withdrawal/security checks (fake DB; synthetic declarations only, no actual writes/network).
+PASS: 15 simulated queue checks (fake DB; no real MySQL).
+PASS: 19 pure R2 tests (no WordPress / SQL).
+PASS: 10 R3 CLI argument hotfix checks (no WP, DB, HTTP).
+PASS: 18 R3 database simulations (fake DB; NO LocalWP/MySQL writes).
+PASS: 60 pure R3 checks; no network/DB/WordPress.
+PASS: 27 R4a manual evidence simulations (fake DB; no LocalWP/MySQL writes).
+PASS: 136 official WP-CLI parser/dispatcher checks (v2.12.0; WP facade/fake DB, no MySQL writes).

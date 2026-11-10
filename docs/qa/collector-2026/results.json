@@ -1,0 +1,32 @@
+{
+  "status": "PASS_OFFLINE_ONLY",
+  "collector_tests": 28,
+  "python_sqlite_tests": 22,
+  "php_facade_tests": 6,
+  "php_lint": [
+    "8.2",
+    "8.4"
+  ],
+  "discovery_regression_suites": 28,
+  "discovery_regression_checks": 1680,
+  "synthetic_sqlite_scales": [
+    10,
+    100,
+    1000
+  ],
+  "existing_pilot_workbook_schools": 200,
+  "existing_pilot_identity_drafts": 10,
+  "actual_localwp_tests": 0,
+  "actual_ollama_model_tests": 0,
+  "combined_national_excel_tests": 0,
+  "production_access": false,
+  "network_fetch_tests": 0,
+  "known_limits": [
+    "No internet source search/fetch/HTTP cache in Python",
+    "No description approval/apply/undo integration",
+    "Windows4GB/555k not benchmarked",
+    "Missing combined2026 Excel and external Collector source"
+  ],
+  "initial_failure": "XML test expected direct exception; final asserts ValueError cause is DefusedXmlException and no rows imported; runtime guard unchanged",
+  "setup": "Workspace venv; defusedxml0.7.1/openpyxl3.1.5/et_xmlfile2.0.0; initial user pip failed read-only, not used"
+}

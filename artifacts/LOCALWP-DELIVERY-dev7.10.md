@@ -65,11 +65,21 @@ Bukti39tes WordPress7.6 dan hasil inspect7.8 Anda tetap scope sebelumnya.
 Data lama Anda tidak diubah, source sekolah tidak diambil. Progres/log/diff ada
 pada docs/PROGRESS.md dan docs/qa/dev7.10 dalam ZIP.
 
-Rollback kode ke7.9 tanpa menghapus tabel atau data. Jika kelak sudah ada write
-nyata, rencanakan kompatibilitas: inspector7.9 belum mengenal tipe evidence arsip
-baru dan dapat menahannya. Jangan downgrade setelah write tanpa review rencana.
+Rollback menggunakan backup folder plugin/situs LocalWP yang dibuat sebelum
+pembaruan. Paket versi lama dan branch pengiriman lama sudah dibersihkan dari
+daftar aktif GitHub; tautan branch lama dalam catatan historis ZIP mungkin tidak
+berlaku lagi. Riwayat commit tetap ada dan cadangan lengkap disimpan lokal pada
+lingkungan pengembangan. Jangan menghapus tabel atau mengimpor sekolah ulang.
+Jika kelak sudah ada write nyata, tinjau kompatibilitas sebelum downgrade.
 Retensi/privacy/enkripsi/kuota-total arsip masih menjadi gate sebelum data nyata.
 
 Tahap berikut: integrasi WordPress nyata, validasi binding penuh dalam review,
 source permission/identity dan approval positif, durable worker lalu publisher
 lokal dengan rollback. Belum ada200profil faktual lengkap atau janji ranking/AI.
+## Kebijakan unduhan setelah perapian
+
+Daftar aktif hanya berisi ZIP7.10 dan panduan ini. Dokumen kontrak proyek di main
+tetap dipertahankan. ZIP/plugin dan SHA-256 tidak berubah; perapian ini hanya
+menghapus paket/panduan yang sudah digantikan serta branch pengiriman lama.
+Versi lama tetap ada dalam riwayat Git, sehingga ukuran GitHub belum tentu
+langsung turun. Tidak ada force rewrite riwayat atau perubahan database/situs.
